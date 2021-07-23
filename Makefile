@@ -54,6 +54,7 @@ export GOPACKAGES   = $(shell go list ./... | grep -v /manager | grep -v /bindat
 build:
 	@common/scripts/gobuild.sh build/_output/bin/$(IMG) ./cmd/manager
 	@common/scripts/gobuild.sh build/_output/bin/uninstall-crd ./cmd/uninstall-crd
+	@common/scripts/gobuild.sh build/_output/bin/appsubpackagestatus ./cmd/appsubstatus
 
 .PHONY: build-images
 

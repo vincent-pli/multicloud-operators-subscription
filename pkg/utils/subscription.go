@@ -30,6 +30,7 @@ import (
 	dplv1 "open-cluster-management.io/multicloud-operators-subscription/pkg/apis/apps/deployable/v1"
 	plrv1 "open-cluster-management.io/multicloud-operators-subscription/pkg/apis/apps/placementrule/v1"
 	appv1 "open-cluster-management.io/multicloud-operators-subscription/pkg/apis/apps/v1"
+	appSubStatusV1alpha1 "open-cluster-management.io/multicloud-operators-subscription/pkg/apis/apps/v1alpha1"
 
 	corev1 "k8s.io/api/core/v1"
 	clientsetx "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
@@ -76,6 +77,76 @@ func IsSubscriptionResourceChanged(oSub, nSub *appv1.Subscription) bool {
 	klog.V(5).Info("Something we don't care changed")
 
 	return false
+}
+
+var AppSubPackageStatusPredicateFunc = predicate.Funcs{
+	UpdateFunc: func(e event.UpdateEvent) bool {
+		klog.Infof("UpdateFunc oldlabels:", e.ObjectOld.GetLabels())
+		_, oldOK := e.ObjectOld.GetLabels()["apps.open-cluster-management.io/hosting-subscription"]
+		_, newOK := e.ObjectNew.GetLabels()["apps.open-cluster-management.io/hosting-subscription"]
+		if !oldOK && !newOK {
+			klog.V(1).Infof("Not a managed cluster appSubPackageStatus updated, old: %v/%v, new: %v/%v",
+				e.ObjectOld.GetNamespace(), e.ObjectOld.GetName(), e.ObjectNew.GetNamespace(), e.ObjectNew.GetName())
+			return false
+		}
+
+		_, oldOK = e.ObjectOld.GetLabels()["apps.open-cluster-management.io/cluster"]
+		_, newOK = e.ObjectNew.GetLabels()["apps.open-cluster-management.io/cluster"]
+
+		if !oldOK && !newOK {
+			klog.V(1).Infof("Not a managed cluster appSubPackageStatus updated, old: %v/%v, new: %v/%v",
+				e.ObjectOld.GetNamespace(), e.ObjectOld.GetName(), e.ObjectNew.GetNamespace(), e.ObjectNew.GetName())
+			return false
+		}
+
+		oldAppSubStatus, ok := e.ObjectOld.(*appSubStatusV1alpha1.SubscriptionPackageStatus)
+		if !ok {
+			klog.V(1).Infof("Not a valid managed cluster appSubPackageStatus, old: %v/%v", e.ObjectOld.GetNamespace(), e.ObjectOld.GetName())
+			return false
+		}
+
+		newAppSubStatus, ok := e.ObjectNew.(*appSubStatusV1alpha1.SubscriptionPackageStatus)
+		if !ok {
+			klog.V(1).Infof("Not a valid managed cluster appSubPackageStatus, new: %v/%v", e.ObjectNew.GetNamespace(), e.ObjectNew.GetName())
+			return false
+		}
+
+		return !reflect.DeepEqual(oldAppSubStatus.Statuses.SubscriptionPackageStatus, newAppSubStatus.Statuses.SubscriptionPackageStatus)
+	},
+	CreateFunc: func(e event.CreateEvent) bool {
+		klog.Infof("CreateFunc oldlabels:", e.Object.GetLabels())
+		_, ok := e.Object.GetLabels()["apps.open-cluster-management.io/hosting-subscription"]
+		if !ok {
+			klog.V(1).Infof("Not a managed cluster appSubPackageStatus created: %v/%v", e.Object.GetNamespace(), e.Object.GetName())
+			return false
+		}
+
+		_, ok = e.Object.GetLabels()["apps.open-cluster-management.io/cluster"]
+		if !ok {
+			klog.V(1).Infof("Not a managed cluster appSubPackageStatus created: %v/%v", e.Object.GetNamespace(), e.Object.GetName())
+			return false
+		}
+
+		klog.V(1).Infof("New managed cluster appSubPackageStatus created: %v/%v", e.Object.GetNamespace(), e.Object.GetName())
+		return true
+	},
+	DeleteFunc: func(e event.DeleteEvent) bool {
+		klog.Infof("DeleteFunc oldlabels:", e.Object.GetLabels())
+		_, ok := e.Object.GetLabels()["apps.open-cluster-management.io/hosting-subscription"]
+		if !ok {
+			klog.V(1).Infof("Not a managed cluster appSubPackageStatus deleted: %v/%v", e.Object.GetNamespace(), e.Object.GetName())
+			return false
+		}
+
+		_, ok = e.Object.GetLabels()["apps.open-cluster-management.io/cluster"]
+		if !ok {
+			klog.V(1).Infof("Not a managed cluster appSubPackageStatus deleted: %v/%v", e.Object.GetNamespace(), e.Object.GetName())
+			return false
+		}
+
+		klog.Infof("managed cluster appSubPackageStatus deleted: %v/%v", e.Object.GetNamespace(), e.Object.GetName())
+		return true
+	},
 }
 
 // SubscriptionPredicateFunctions filters status update
@@ -411,6 +482,31 @@ func GetHostSubscriptionFromObject(obj metav1.Object) *types.NamespacedName {
 	host := &types.NamespacedName{Name: parsedstr[1], Namespace: parsedstr[0]}
 
 	return host
+}
+
+// GetHostSubscriptionNSFromObject extract the appsub NS from the hosting-subscription label
+func GetHostSubscriptionNSFromObject(ClusterNsManagedSubStatusName string) (string, string) {
+	if ClusterNsManagedSubStatusName == "" {
+		return "", ""
+	}
+
+	pos := strings.Index(ClusterNsManagedSubStatusName, ".status")
+	if pos == -1 {
+		return "", ""
+	}
+
+	hosttr := ClusterNsManagedSubStatusName[:pos]
+
+	if hosttr == "" {
+		return "", ""
+	}
+
+	parsedstr := strings.Split(hosttr, ".")
+	if len(parsedstr) != 2 {
+		return "", ""
+	}
+
+	return parsedstr[0], parsedstr[1]
 }
 
 // SetInClusterPackageStatus creates status strcuture and fill status
